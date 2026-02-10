@@ -28,7 +28,7 @@
         import { initializeApp } from 'firebase/app';
         import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, updateDoc } from 'firebase/firestore';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-        import { Car, User, MapPin, CheckCircle2, AlertCircle, Edit3, Loader2, CalendarDays, Users, Banknote } from 'lucide-react';
+        import { Car, User, MapPin, CheckCircle2, AlertCircle, Edit3, Loader2, CalendarDays, Users, Banknote, Clock } from 'lucide-react';
 
         const firebaseConfig = {
             apiKey: "AIzaSyB8mujwEnMA0oynk5liia3QXPMWGQyPRfs",
@@ -43,13 +43,13 @@
         const db = getFirestore(app);
         const auth = getAuth(app);
         
-        // [중요 수정] 관리자 앱이 바라보는 주소와 똑같이 맞췄습니다.
-        // 이제 입력하면 관리자 화면에 바로 뜹니다.
+        // 관리자 앱과 동일한 ID 사용
         const appId = '1:104913357347:web:e3054f97d1d63b97cf7f96';
 
         const PARKING_LOCATIONS = ["어린이회관 주차장1", "어린이회관 주차장2", "세종대 대양AI센터 주차장", "국민은행 주차장", "교회 뒷편 세종대 주차장", "광진광장 공영주차장"];
         const POSITIONS = ["청년", "성도", "집사", "권사", "장로"]; 
         const BANK_NAMES = ["카카오뱅크", "국민", "농협", "신한", "우리", "하나", "기업", "토스뱅크", "새마을", "우체국", "SC제일", "대구", "부산", "광주", "신협", "수협"].sort();
+        const HOURLY_RATE = 3000; // 시간당 요금
 
         function MemberApp() {
             const [user, setUser] = useState(null);
@@ -66,7 +66,8 @@
                 parkingLocation: PARKING_LOCATIONS[0],
                 bankName: BANK_NAMES[0],
                 accountNumber: '',
-                phoneNumber: '' 
+                phoneNumber: '',
+                parkingDuration: '1' // 기본 1시간
             });
 
             useEffect(() => {
@@ -117,7 +118,8 @@
                                     parkingLocation: data.parkingLocation || PARKING_LOCATIONS[0],
                                     bankName: bankName,
                                     accountNumber: accountNumber,
-                                    phoneNumber: data.phoneNumber || ''
+                                    phoneNumber: data.phoneNumber || '',
+                                    parkingDuration: data.parkingDurationHours ? String(data.parkingDurationHours) : '1'
                                 });
                             } else { localStorage.removeItem('my_parking_id'); }
                         }
@@ -127,7 +129,12 @@
                         const savedProfile = localStorage.getItem('church_parking_profile');
                         if (savedProfile) {
                             const profile = JSON.parse(savedProfile);
-                            setFormData(prev => ({ ...prev, ...profile, parkingDate: today }));
+                            setFormData(prev => ({ 
+                                ...prev, 
+                                ...profile, 
+                                parkingDate: today,
+                                parkingDuration: '1' // 시간은 기본값 리셋
+                            }));
                         }
                     }
                 } catch (e) { console.error(e); }
@@ -144,6 +151,9 @@
                 if (!user) { alert("잠시 후 다시 시도해주세요 (인증 중)"); return; }
                 setSubmitting(true);
 
+                const duration = parseInt(formData.parkingDuration);
+                const fee = duration * HOURLY_RATE;
+
                 const payload = {
                     parkingDate: formData.parkingDate,
                     name: formData.name,
@@ -154,7 +164,12 @@
                     phoneNumber: formData.phoneNumber,
                     updatedAt: serverTimestamp(),
                     userId: user.uid,
-                    calculatedFee: 0, parkingDurationHours: 0, hourlyRate: 0, isSelfRegistered: true
+                    
+                    // [비용 계산 로직 추가]
+                    calculatedFee: fee, 
+                    parkingDurationHours: duration, 
+                    hourlyRate: HOURLY_RATE, 
+                    isSelfRegistered: true
                 };
 
                 try {
@@ -168,7 +183,15 @@
                         setDocId(docRef.id);
                     }
                     
-                    const profile = { ...formData };
+                    const profile = { 
+                        name: formData.name,
+                        position: formData.position,
+                        carNumber: formData.carNumber,
+                        parkingLocation: formData.parkingLocation,
+                        bankName: formData.bankName,
+                        accountNumber: formData.accountNumber,
+                        phoneNumber: formData.phoneNumber
+                    };
                     localStorage.setItem('church_parking_profile', JSON.stringify(profile));
                     setComplete(true);
                 } catch (error) {
@@ -186,6 +209,7 @@
             if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-blue-600 w-10 h-10"/></div>;
 
             if (complete) {
+                const fee = parseInt(formData.parkingDuration) * HOURLY_RATE;
                 return (
                     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
                         <div className="bg-white p-8 rounded-[2rem] shadow-xl w-full max-w-md border-2 border-green-100">
@@ -198,7 +222,8 @@
                                 <p className="text-xs font-black text-slate-400 uppercase mb-2 pb-2 border-b border-slate-200">신청 정보 확인</p>
                                 <div className="flex justify-between"><span className="text-slate-500">신청자</span><span className="font-black text-slate-800">{formData.name} ({formData.position})</span></div>
                                 <div className="flex justify-between"><span className="text-slate-500">날짜</span><span className="font-bold text-slate-800">{formData.parkingDate}</span></div>
-                                <div className="flex justify-between"><span className="text-slate-500">차량번호</span><span className="font-black text-blue-600">{formData.carNumber}</span></div>
+                                <div className="flex justify-between"><span className="text-slate-500">주차시간</span><span className="font-bold text-blue-600">{formData.parkingDuration}시간 ({fee.toLocaleString()}원)</span></div>
+                                <div className="flex justify-between"><span className="text-slate-500">차량번호</span><span className="font-black text-slate-800">{formData.carNumber}</span></div>
                                 <div className="text-right text-sm text-slate-400 mt-2">{formData.parkingLocation}</div>
                             </div>
                             <button onClick={() => setComplete(false)} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-black text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
@@ -239,6 +264,15 @@
                                         {POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
                                     </select>
                                 </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Clock size={14}/> 주차 시간 선택 (3,000원/시간)</label>
+                                <select name="parkingDuration" value={formData.parkingDuration} onChange={handleChange} className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors appearance-none">
+                                    <option value="1">1시간 (3,000원)</option>
+                                    <option value="2">2시간 (6,000원)</option>
+                                    <option value="3">3시간 (9,000원)</option>
+                                    <option value="4">4시간 (12,000원)</option>
+                                </select>
                             </div>
                             <div className="space-y-2">
                                 <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Banknote size={14}/> 환급 계좌 (본인 명의)</label>
