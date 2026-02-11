@@ -12,8 +12,7 @@
             "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
             "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
             "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
-            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js",
-            "lucide-react": "https://esm.sh/lucide-react@0.344.0"
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
         }
     }
     </script>
@@ -26,9 +25,46 @@
         import React, { useState, useEffect } from 'react';
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'firebase/app';
-        import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, updateDoc } from 'firebase/firestore';
+        // [수정] query, where, getDocs 추가 (데이터 조회를 위해)
+        import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, updateDoc, query, where, getDocs } from 'firebase/firestore';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-        import { Car, User, MapPin, CheckCircle2, AlertCircle, Edit3, Loader2, CalendarDays, Users, Banknote, Clock } from 'lucide-react';
+
+        // 아이콘 컴포넌트 (직접 내장)
+        const IconBase = ({ children, className, size = 24, ...props }) => (
+            <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width={size} 
+                height={size} 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className={className} 
+                {...props}
+            >
+                {children}
+            </svg>
+        );
+
+        const Icons = {
+            Car: (props) => <IconBase {...props}><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M5 17h2"/><path d="M15 17h2"/></IconBase>,
+            User: (props) => <IconBase {...props}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></IconBase>,
+            MapPin: (props) => <IconBase {...props}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></IconBase>,
+            CheckCircle2: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></IconBase>,
+            AlertCircle: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></IconBase>,
+            Edit3: (props) => <IconBase {...props}><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></IconBase>,
+            Loader2: (props) => <IconBase {...props} className={`${props.className} animate-spin`}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></IconBase>,
+            CalendarDays: (props) => <IconBase {...props}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></IconBase>,
+            Users: (props) => <IconBase {...props}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></IconBase>,
+            Banknote: (props) => <IconBase {...props}><rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></IconBase>,
+            Clock: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></IconBase>,
+            Camera: (props) => <IconBase {...props}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></IconBase>,
+            Image: (props) => <IconBase {...props}><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></IconBase>,
+            DollarSign: (props) => <IconBase {...props}><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></IconBase>,
+            Sparkles: (props) => <IconBase {...props}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275Z"/></IconBase>
+        };
 
         const firebaseConfig = {
             apiKey: "AIzaSyB8mujwEnMA0oynk5liia3QXPMWGQyPRfs",
@@ -43,13 +79,12 @@
         const db = getFirestore(app);
         const auth = getAuth(app);
         
-        // 관리자 앱과 동일한 ID 사용
         const appId = '1:104913357347:web:e3054f97d1d63b97cf7f96';
 
         const PARKING_LOCATIONS = ["어린이회관 주차장1", "어린이회관 주차장2", "세종대 대양AI센터 주차장", "국민은행 주차장", "교회 뒷편 세종대 주차장", "광진광장 공영주차장"];
         const POSITIONS = ["청년", "성도", "집사", "권사", "장로"]; 
         const BANK_NAMES = ["카카오뱅크", "국민", "농협", "신한", "우리", "하나", "기업", "토스뱅크", "새마을", "우체국", "SC제일", "대구", "부산", "광주", "신협", "수협"].sort();
-        const HOURLY_RATE = 3000; // 시간당 요금
+        const HOURLY_RATE = 3000;
 
         function MemberApp() {
             const [user, setUser] = useState(null);
@@ -57,6 +92,9 @@
             const [submitting, setSubmitting] = useState(false);
             const [docId, setDocId] = useState(null);
             const [complete, setComplete] = useState(false);
+            const [receiptBase64, setReceiptBase64] = useState(null); 
+            const [fileName, setFileName] = useState(null); 
+            const [autoFilled, setAutoFilled] = useState(false); // 자동완성 알림 상태
 
             const [formData, setFormData] = useState({
                 parkingDate: new Date().toISOString().split('T')[0],
@@ -67,7 +105,7 @@
                 bankName: BANK_NAMES[0],
                 accountNumber: '',
                 phoneNumber: '',
-                parkingDuration: '1' // 기본 1시간
+                parkingDuration: '1'
             });
 
             useEffect(() => {
@@ -121,6 +159,10 @@
                                     phoneNumber: data.phoneNumber || '',
                                     parkingDuration: data.parkingDurationHours ? String(data.parkingDurationHours) : '1'
                                 });
+                                if (data.receiptUrl) {
+                                    setReceiptBase64(data.receiptUrl);
+                                    setFileName("기존 영수증 이미지");
+                                }
                             } else { localStorage.removeItem('my_parking_id'); }
                         }
                     }
@@ -133,7 +175,7 @@
                                 ...prev, 
                                 ...profile, 
                                 parkingDate: today,
-                                parkingDuration: '1' // 시간은 기본값 리셋
+                                parkingDuration: '1'
                             }));
                         }
                     }
@@ -146,33 +188,139 @@
                 setFormData(prev => ({ ...prev, [name]: value }));
             };
 
+            // [추가] 이름 입력 후 포커스 아웃 시 DB에서 최신 정보 조회
+            const handleNameBlur = async () => {
+                if (!formData.name || formData.name.length < 2) return;
+                
+                try {
+                    // 같은 이름의 기록 중 가장 최근 것 조회
+                    const q = query(
+                        collection(db, 'artifacts', appId, 'public', 'data', 'parkingRecords'),
+                        where('name', '==', formData.name.trim())
+                    );
+                    const querySnapshot = await getDocs(q);
+                    
+                    if (!querySnapshot.empty) {
+                        // 클라이언트 측에서 최신순 정렬 (timestamp 기준)
+                        const docs = querySnapshot.docs.map(d => d.data());
+                        docs.sort((a, b) => {
+                            const timeA = a.createdAt?.seconds || 0;
+                            const timeB = b.createdAt?.seconds || 0;
+                            return timeB - timeA;
+                        });
+                        const match = docs[0];
+
+                        // 정보 자동 채우기
+                        if (match) {
+                            let bankName = formData.bankName;
+                            let accountNumber = formData.accountNumber;
+
+                            if (match.accountInfo) {
+                                if (match.accountInfo.includes('/')) {
+                                    const [b, a] = match.accountInfo.split('/');
+                                    bankName = b; accountNumber = a;
+                                } else if (match.accountInfo.includes(' ')) {
+                                    const parts = match.accountInfo.split(' ');
+                                    bankName = parts[0]; accountNumber = parts.slice(1).join('');
+                                }
+                            }
+
+                            setFormData(prev => ({
+                                ...prev,
+                                position: match.position || prev.position,
+                                carNumber: match.carNumber || prev.carNumber,
+                                parkingLocation: match.parkingLocation || prev.parkingLocation,
+                                bankName: bankName || prev.bankName,
+                                accountNumber: accountNumber || prev.accountNumber,
+                                phoneNumber: match.phoneNumber || prev.phoneNumber
+                            }));
+                            
+                            setAutoFilled(true);
+                            setTimeout(() => setAutoFilled(false), 3000); // 3초 뒤 알림 끔
+                        }
+                    }
+                } catch (e) {
+                    console.error("Auto-fill error:", e);
+                }
+            };
+
+            const compressImage = (file) => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(file);
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.src = event.target.result;
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            const MAX_WIDTH = 800; 
+                            const scaleSize = MAX_WIDTH / img.width;
+                            
+                            if (scaleSize < 1) {
+                                canvas.width = MAX_WIDTH;
+                                canvas.height = img.height * scaleSize;
+                            } else {
+                                canvas.width = img.width;
+                                canvas.height = img.height;
+                            }
+
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                            resolve(dataUrl);
+                        };
+                        img.onerror = (error) => reject(error);
+                    };
+                    reader.onerror = (error) => reject(error);
+                });
+            };
+
+            const handleFileChange = async (e) => {
+                if (e.target.files[0]) {
+                    const file = e.target.files[0];
+                    setFileName(file.name);
+                    try {
+                        const compressedBase64 = await compressImage(file);
+                        setReceiptBase64(compressedBase64);
+                    } catch (error) {
+                        alert("이미지 처리 중 오류가 발생했습니다.");
+                        console.error(error);
+                    }
+                }
+            };
+
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 if (!user) { alert("잠시 후 다시 시도해주세요 (인증 중)"); return; }
+                
+                if (!receiptBase64 && !docId) { 
+                    alert("영수증 사진을 꼭 첨부해주세요!");
+                    return;
+                }
+
                 setSubmitting(true);
 
-                const duration = parseInt(formData.parkingDuration);
-                const fee = duration * HOURLY_RATE;
-
-                const payload = {
-                    parkingDate: formData.parkingDate,
-                    name: formData.name,
-                    position: formData.position,
-                    carNumber: formData.carNumber,
-                    parkingLocation: formData.parkingLocation,
-                    accountInfo: `${formData.bankName}/${formData.accountNumber}`, 
-                    phoneNumber: formData.phoneNumber,
-                    updatedAt: serverTimestamp(),
-                    userId: user.uid,
-                    
-                    // [비용 계산 로직 추가]
-                    calculatedFee: fee, 
-                    parkingDurationHours: duration, 
-                    hourlyRate: HOURLY_RATE, 
-                    isSelfRegistered: true
-                };
-
                 try {
+                    const duration = parseInt(formData.parkingDuration);
+                    const fee = duration * HOURLY_RATE;
+
+                    const payload = {
+                        parkingDate: formData.parkingDate,
+                        name: formData.name,
+                        position: formData.position,
+                        carNumber: formData.carNumber,
+                        parkingLocation: formData.parkingLocation,
+                        accountInfo: `${formData.bankName}/${formData.accountNumber}`, 
+                        phoneNumber: formData.phoneNumber,
+                        updatedAt: serverTimestamp(),
+                        userId: user.uid,
+                        calculatedFee: fee, 
+                        parkingDurationHours: duration, 
+                        hourlyRate: HOURLY_RATE, 
+                        isSelfRegistered: true,
+                        receiptUrl: receiptBase64 
+                    };
+
                     if (docId) {
                         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'parkingRecords', docId);
                         await updateDoc(docRef, payload);
@@ -193,20 +341,17 @@
                         phoneNumber: formData.phoneNumber
                     };
                     localStorage.setItem('church_parking_profile', JSON.stringify(profile));
+                    
                     setComplete(true);
                 } catch (error) {
                     console.error(error);
-                    if (error.code === 'permission-denied') {
-                        alert("⚠️ 저장 실패! (권한 오류)\n\n목사님, 파이어베이스 콘솔에서 [Firestore Database] -> [규칙(Rules)] 탭에 들어가셔서 코드를 수정하고 [게시] 버튼을 눌러주셔야 합니다.");
-                    } else {
-                        alert("저장 실패: " + error.message);
-                    }
+                    alert("저장 실패: " + error.message);
                 } finally {
                     setSubmitting(false);
                 }
             };
 
-            if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-blue-600 w-10 h-10"/></div>;
+            if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Icons.Loader2 className="animate-spin text-blue-600 w-10 h-10"/></div>;
 
             if (complete) {
                 const fee = parseInt(formData.parkingDuration) * HOURLY_RATE;
@@ -214,7 +359,7 @@
                     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
                         <div className="bg-white p-8 rounded-[2rem] shadow-xl w-full max-w-md border-2 border-green-100">
                             <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
-                                <CheckCircle2 size={40} />
+                                <Icons.CheckCircle2 size={40} />
                             </div>
                             <h2 className="text-2xl font-black text-slate-800 mb-2">신청이 완료되었습니다!</h2>
                             <p className="text-slate-500 font-bold mb-8">안전하게 귀가하세요.</p>
@@ -225,9 +370,10 @@
                                 <div className="flex justify-between"><span className="text-slate-500">주차시간</span><span className="font-bold text-blue-600">{formData.parkingDuration}시간 ({fee.toLocaleString()}원)</span></div>
                                 <div className="flex justify-between"><span className="text-slate-500">차량번호</span><span className="font-black text-slate-800">{formData.carNumber}</span></div>
                                 <div className="text-right text-sm text-slate-400 mt-2">{formData.parkingLocation}</div>
+                                <div className="text-right text-xs text-green-600 mt-1 font-bold flex items-center justify-end gap-1"><Icons.CheckCircle2 size={10}/> 영수증 제출됨</div>
                             </div>
                             <button onClick={() => setComplete(false)} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-black text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
-                                <Edit3 size={18} /> 내용 수정하기
+                                <Icons.Edit3 size={18} /> 내용 수정하기
                             </button>
                         </div>
                     </div>
@@ -240,33 +386,50 @@
                         <div className="bg-blue-600 p-8 text-center relative overflow-hidden">
                              <div className="absolute top-0 left-0 w-full h-full bg-white opacity-10" style={{backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)', backgroundSize: '20px 20px'}}></div>
                             <h1 className="text-2xl font-black text-white relative z-10 flex items-center justify-center gap-2">
-                                <Car className="w-8 h-8"/> 차량정보를 입력해 주세요
+                                <Icons.Car className="w-8 h-8"/> 차량정보를 입력해 주세요
                             </h1>
                         </div>
                         <form onSubmit={handleSubmit} className="p-8 space-y-6">
                             {docId && (
                                 <div className="bg-orange-50 text-orange-600 p-4 rounded-2xl text-sm font-bold flex items-center gap-2 border border-orange-100">
-                                    <AlertCircle size={16}/> 기존 신청 내역을 수정 중입니다.
+                                    <Icons.AlertCircle size={16}/> 기존 신청 내역을 수정 중입니다.
                                 </div>
                             )}
+                            
+                            {/* [추가] 자동완성 알림 메시지 */}
+                            {autoFilled && (
+                                <div className="bg-indigo-50 text-indigo-700 p-3 rounded-2xl text-sm font-bold flex items-center gap-2 animate-in slide-in-from-top-2 border border-indigo-100">
+                                    <Icons.Sparkles size={16} /> 기존 정보를 불러왔습니다!
+                                </div>
+                            )}
+
                             <div className="space-y-2">
-                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><CalendarDays size={14}/> 주차 날짜</label>
+                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.CalendarDays size={14}/> 주차 날짜</label>
                                 <input type="date" name="parkingDate" value={formData.parkingDate} onChange={handleChange} className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors" required />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><User size={14}/> 성함</label>
-                                    <input type="text" name="name" value={formData.name} onChange={handleChange} placeholder="성함" className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors" required />
+                                    <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.User size={14}/> 성함</label>
+                                    <input 
+                                        type="text" 
+                                        name="name" 
+                                        value={formData.name} 
+                                        onChange={handleChange} 
+                                        onBlur={handleNameBlur} // [중요] 이름 입력 후 포커스 아웃 시 자동완성
+                                        placeholder="성함" 
+                                        className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors" 
+                                        required 
+                                    />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Users size={14}/> 직분</label>
+                                    <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.Users size={14}/> 직분</label>
                                     <select name="position" value={formData.position} onChange={handleChange} className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors appearance-none">
                                         {POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
                                     </select>
                                 </div>
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Clock size={14}/> 주차 시간 선택 (3,000원/시간)</label>
+                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.Clock size={14}/> 주차 시간 선택 (3,000원/시간)</label>
                                 <select name="parkingDuration" value={formData.parkingDuration} onChange={handleChange} className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors appearance-none">
                                     <option value="1">1시간 (3,000원)</option>
                                     <option value="2">2시간 (6,000원)</option>
@@ -274,8 +437,27 @@
                                     <option value="4">4시간 (12,000원)</option>
                                 </select>
                             </div>
+                            
                             <div className="space-y-2">
-                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Banknote size={14}/> 환급 계좌 (본인 명의)</label>
+                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2">
+                                    <Icons.Camera size={14}/> 결제 영수증 첨부 (필수)
+                                </label>
+                                <label className="flex items-center gap-3 w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-100 transition-colors">
+                                    <div className={`p-2 rounded-full ${receiptBase64 ? 'bg-green-100 text-green-600' : 'bg-slate-200 text-slate-500'}`}>
+                                        {receiptBase64 ? <Icons.CheckCircle2 size={20}/> : <Icons.Image size={20}/>}
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className={`font-bold text-lg ${receiptBase64 ? 'text-green-600' : 'text-slate-400'}`}>
+                                            {receiptBase64 ? '사진 첨부됨' : '사진 촬영 또는 앨범 선택'}
+                                        </span>
+                                        {fileName && <span className="text-xs text-slate-400 font-normal">{fileName}</span>}
+                                    </div>
+                                    <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" capture="environment" />
+                                </label>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.Banknote size={14}/> 환급 계좌 (본인 명의)</label>
                                 <div className="flex gap-2">
                                     <select name="bankName" value={formData.bankName} onChange={handleChange} className="w-1/3 p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors appearance-none">
                                         {BANK_NAMES.map(bank => <option key={bank} value={bank}>{bank}</option>)}
@@ -284,11 +466,11 @@
                                 </div>
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Car size={14}/> 차량 번호 (전체)</label>
+                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.Car size={14}/> 차량 번호 (전체)</label>
                                 <input type="text" name="carNumber" value={formData.carNumber} onChange={handleChange} placeholder="예: 12가 3456" className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors" required />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><MapPin size={14}/> 주차 장소</label>
+                                <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.MapPin size={14}/> 주차 장소</label>
                                 <select name="parkingLocation" value={formData.parkingLocation} onChange={handleChange} className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors appearance-none">
                                     {PARKING_LOCATIONS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
                                 </select>
@@ -298,7 +480,7 @@
                                     * 주차비용 정산은 등록교인만 가능합니다.
                                 </div>
                                 <button type="submit" disabled={submitting} className="w-full py-5 bg-blue-600 text-white font-black text-xl rounded-2xl shadow-xl shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center">
-                                    {submitting ? <Loader2 className="animate-spin"/> : (docId ? '신청서 수정하기' : '비용 신청하기')}
+                                    {submitting ? <Icons.Loader2 className="animate-spin"/> : (docId ? '신청서 수정하기' : '비용 신청하기')}
                                 </button>
                             </div>
                         </form>
