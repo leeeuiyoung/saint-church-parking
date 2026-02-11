@@ -99,6 +99,9 @@
             const [suggestions, setSuggestions] = useState([]);
             const [showSuggestions, setShowSuggestions] = useState(false);
 
+            // [추가] 변경 전 원본 데이터를 저장해둘 상태 (비교용)
+            const [originalData, setOriginalData] = useState(null);
+
             const [formData, setFormData] = useState({
                 parkingDate: new Date().toISOString().split('T')[0],
                 name: '',
@@ -122,7 +125,6 @@
                 return () => unsub();
             }, []);
 
-            // [오류 해결] 누락되었던 공통 입력 핸들러 추가
             const handleChange = (e) => {
                 const { name, value } = e.target;
                 setFormData(prev => ({ ...prev, [name]: value }));
@@ -183,8 +185,8 @@
                     }
                 }
 
-                setFormData(prev => ({
-                    ...prev,
+                // [수정] 원본 데이터 저장 (수정 여부 확인용)
+                const parsedData = {
                     name: data.name,
                     position: data.position || '성도',
                     carNumber: data.carNumber || '',
@@ -193,10 +195,18 @@
                     accountNumber: accountNumber,
                     phoneNumber: data.phoneNumber || '',
                     parkingDuration: data.parkingDurationHours ? String(data.parkingDurationHours) : '1'
+                };
+                
+                setOriginalData(parsedData); // 비교를 위해 저장
+                
+                setFormData(prev => ({
+                    ...prev,
+                    ...parsedData,
+                    parkingDate: prev.parkingDate // 날짜는 유지
                 }));
             };
 
-            // [기능 추가] 이름 입력 시 실시간 검색 (한글자 입력 시에도 동작)
+            // [수정] 이름 입력 시 실시간 검색 (limit 50으로 증가)
             const handleNameChange = async (e) => {
                 const val = e.target.value;
                 setFormData(prev => ({ ...prev, name: val }));
@@ -208,7 +218,7 @@
                             orderBy('name'),
                             startAt(val),
                             endAt(val + '\uf8ff'),
-                            limit(5)
+                            limit(50) // [수정] 더 많은 결과를 보여주도록 50으로 변경
                         );
                         const querySnapshot = await getDocs(q);
                         const names = new Map();
@@ -250,7 +260,7 @@
                         
                         fillFormData(match);
                         
-                        // 날짜는 오늘로, 시간은 1시간으로 초기화
+                        // 날짜는 오늘로, 시간은 1시간으로 초기화 (새로운 신청이므로)
                         setFormData(prev => ({
                             ...prev,
                             parkingDate: new Date().toISOString().split('T')[0],
@@ -263,7 +273,6 @@
                 } catch (e) { console.error(e); }
             };
 
-            // [수정] 엔터키 입력 시 폼 제출 방지
             const handleKeyDown = (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
@@ -326,6 +335,21 @@
                 if (!receiptBase64 && !docId) { 
                     alert("영수증 사진을 꼭 첨부해주세요!");
                     return;
+                }
+
+                // [핵심] 정보 수정 시 확인 팝업 로직
+                // 불러온 정보(originalData)가 있고, 현재 입력값과 다른 부분이 있는지 확인
+                if (originalData) {
+                    const isPositionChanged = originalData.position !== formData.position;
+                    const isBankChanged = originalData.bankName !== formData.bankName || originalData.accountNumber !== formData.accountNumber;
+                    const isCarChanged = originalData.carNumber !== formData.carNumber;
+
+                    if (isPositionChanged || isBankChanged || isCarChanged) {
+                        const confirmMsg = "기존 정보와 다른 내용이 있습니다.\n(직분, 계좌 또는 차량번호)\n\n정말 수정된 정보로 제출하시겠습니까?";
+                        if (!window.confirm(confirmMsg)) {
+                            return; // 취소 시 중단
+                        }
+                    }
                 }
 
                 setSubmitting(true);
