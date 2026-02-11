@@ -22,14 +22,14 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useEffect } from 'react';
+        import React, { useState, useEffect, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'firebase/app';
-        // [수정] query, where, getDocs 추가 (데이터 조회를 위해)
-        import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, updateDoc, query, where, getDocs } from 'firebase/firestore';
+        // [수정] 검색 기능에 필요한 orderBy, startAt, endAt, limit 추가
+        import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, updateDoc, query, where, getDocs, orderBy, startAt, endAt, limit } from 'firebase/firestore';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
-        // 아이콘 컴포넌트 (직접 내장)
+        // 아이콘 컴포넌트
         const IconBase = ({ children, className, size = 24, ...props }) => (
             <svg 
                 xmlns="http://www.w3.org/2000/svg" 
@@ -94,7 +94,11 @@
             const [complete, setComplete] = useState(false);
             const [receiptBase64, setReceiptBase64] = useState(null); 
             const [fileName, setFileName] = useState(null); 
-            const [autoFilled, setAutoFilled] = useState(false); // 자동완성 알림 상태
+            const [autoFilled, setAutoFilled] = useState(false); 
+            
+            // [추가] 이름 검색 관련 상태
+            const [suggestions, setSuggestions] = useState([]);
+            const [showSuggestions, setShowSuggestions] = useState(false);
 
             const [formData, setFormData] = useState({
                 parkingDate: new Date().toISOString().split('T')[0],
@@ -134,31 +138,7 @@
                             if (recordDate === today) {
                                 setDocId(savedDocId);
                                 isEditingToday = true;
-                                
-                                let bankName = BANK_NAMES[0];
-                                let accountNumber = '';
-                                if (data.accountInfo) {
-                                    const separator = data.accountInfo.includes('/') ? '/' : ' ';
-                                    const parts = data.accountInfo.split(separator);
-                                    if (parts.length > 1) {
-                                        bankName = parts[0];
-                                        accountNumber = parts.slice(1).join('');
-                                    } else {
-                                        accountNumber = data.accountInfo;
-                                    }
-                                }
-
-                                setFormData({
-                                    parkingDate: data.parkingDate || today,
-                                    name: data.name || '',
-                                    position: data.position || '성도',
-                                    carNumber: data.carNumber || '',
-                                    parkingLocation: data.parkingLocation || PARKING_LOCATIONS[0],
-                                    bankName: bankName,
-                                    accountNumber: accountNumber,
-                                    phoneNumber: data.phoneNumber || '',
-                                    parkingDuration: data.parkingDurationHours ? String(data.parkingDurationHours) : '1'
-                                });
+                                fillFormData(data); // 데이터 채우기 공통 함수 사용
                                 if (data.receiptUrl) {
                                     setReceiptBase64(data.receiptUrl);
                                     setFileName("기존 영수증 이미지");
@@ -183,65 +163,120 @@
                 setLoading(false);
             };
 
-            const handleChange = (e) => {
-                const { name, value } = e.target;
-                setFormData(prev => ({ ...prev, [name]: value }));
+            // 데이터로 폼 채우는 공통 함수
+            const fillFormData = (data) => {
+                let bankName = BANK_NAMES[0];
+                let accountNumber = '';
+                if (data.accountInfo) {
+                    if (data.accountInfo.includes('/')) {
+                        const [b, a] = data.accountInfo.split('/');
+                        bankName = b; accountNumber = a;
+                    } else if (data.accountInfo.includes(' ')) {
+                        const parts = data.accountInfo.split(' ');
+                        bankName = parts[0]; accountNumber = parts.slice(1).join('');
+                    } else {
+                        accountNumber = data.accountInfo;
+                    }
+                }
+
+                setFormData(prev => ({
+                    ...prev,
+                    name: data.name,
+                    position: data.position || '성도',
+                    carNumber: data.carNumber || '',
+                    parkingLocation: data.parkingLocation || PARKING_LOCATIONS[0],
+                    bankName: bankName,
+                    accountNumber: accountNumber,
+                    phoneNumber: data.phoneNumber || '',
+                    parkingDuration: data.parkingDurationHours ? String(data.parkingDurationHours) : '1'
+                }));
             };
 
-            // [추가] 이름 입력 후 포커스 아웃 시 DB에서 최신 정보 조회
-            const handleNameBlur = async () => {
-                if (!formData.name || formData.name.length < 2) return;
-                
+            // [수정] 이름 입력 시 실시간 검색
+            const handleNameChange = async (e) => {
+                const val = e.target.value;
+                setFormData(prev => ({ ...prev, name: val }));
+
+                if (val.length > 0) {
+                    try {
+                        // 이름으로 시작하는 기록 검색 (최대 5개)
+                        const q = query(
+                            collection(db, 'artifacts', appId, 'public', 'data', 'parkingRecords'),
+                            orderBy('name'),
+                            startAt(val),
+                            endAt(val + '\uf8ff'),
+                            limit(5)
+                        );
+                        const querySnapshot = await getDocs(q);
+                        const names = new Map();
+                        
+                        querySnapshot.forEach((doc) => {
+                            const data = doc.data();
+                            if (data.name && !names.has(data.name)) {
+                                names.set(data.name, data);
+                            }
+                        });
+                        
+                        setSuggestions(Array.from(names.values()));
+                        setShowSuggestions(true);
+                    } catch (error) {
+                        // 인덱스 에러가 날 수 있으니 조용히 처리 (사용자 경험 방해 X)
+                        // console.error(error); 
+                    }
+                } else {
+                    setSuggestions([]);
+                    setShowSuggestions(false);
+                }
+            };
+
+            // [추가] 추천 이름 선택 시 자동 완성
+            const selectSuggestion = async (selectedName) => {
+                // 선택한 이름으로 입력창 업데이트
+                setFormData(prev => ({ ...prev, name: selectedName }));
+                setShowSuggestions(false);
+
+                // 선택한 이름으로 최신 기록 조회하여 폼 채우기
                 try {
-                    // 같은 이름의 기록 중 가장 최근 것 조회
                     const q = query(
                         collection(db, 'artifacts', appId, 'public', 'data', 'parkingRecords'),
-                        where('name', '==', formData.name.trim())
+                        where('name', '==', selectedName)
                     );
                     const querySnapshot = await getDocs(q);
                     
                     if (!querySnapshot.empty) {
-                        // 클라이언트 측에서 최신순 정렬 (timestamp 기준)
                         const docs = querySnapshot.docs.map(d => d.data());
-                        docs.sort((a, b) => {
-                            const timeA = a.createdAt?.seconds || 0;
-                            const timeB = b.createdAt?.seconds || 0;
-                            return timeB - timeA;
-                        });
+                        // 최신순 정렬
+                        docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
                         const match = docs[0];
+                        
+                        // 공통 함수로 폼 채우기
+                        fillFormData(match);
+                        
+                        // 날짜는 오늘 날짜로 유지, 시간은 1시간으로 리셋
+                        setFormData(prev => ({
+                            ...prev,
+                            parkingDate: new Date().toISOString().split('T')[0],
+                            parkingDuration: '1'
+                        }));
 
-                        // 정보 자동 채우기
-                        if (match) {
-                            let bankName = formData.bankName;
-                            let accountNumber = formData.accountNumber;
-
-                            if (match.accountInfo) {
-                                if (match.accountInfo.includes('/')) {
-                                    const [b, a] = match.accountInfo.split('/');
-                                    bankName = b; accountNumber = a;
-                                } else if (match.accountInfo.includes(' ')) {
-                                    const parts = match.accountInfo.split(' ');
-                                    bankName = parts[0]; accountNumber = parts.slice(1).join('');
-                                }
-                            }
-
-                            setFormData(prev => ({
-                                ...prev,
-                                position: match.position || prev.position,
-                                carNumber: match.carNumber || prev.carNumber,
-                                parkingLocation: match.parkingLocation || prev.parkingLocation,
-                                bankName: bankName || prev.bankName,
-                                accountNumber: accountNumber || prev.accountNumber,
-                                phoneNumber: match.phoneNumber || prev.phoneNumber
-                            }));
-                            
-                            setAutoFilled(true);
-                            setTimeout(() => setAutoFilled(false), 3000); // 3초 뒤 알림 끔
-                        }
+                        setAutoFilled(true);
+                        setTimeout(() => setAutoFilled(false), 3000);
                     }
-                } catch (e) {
-                    console.error("Auto-fill error:", e);
+                } catch (e) { console.error(e); }
+            };
+
+            // [추가] 엔터키 입력 시 폼 제출 방지
+            const handleKeyDown = (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
                 }
+            };
+
+            // 기존 handleNameBlur는 유지하되 추천 목록 클릭 시 닫히지 않도록 처리 필요
+            // 여기서는 onMouseDown을 사용하여 클릭을 우선 처리함
+            const handleNameBlur = () => {
+                // 짧은 지연을 두어 클릭 이벤트가 먼저 발생하게 함
+                setTimeout(() => setShowSuggestions(false), 200);
             };
 
             const compressImage = (file) => {
@@ -389,17 +424,18 @@
                                 <Icons.Car className="w-8 h-8"/> 차량정보를 입력해 주세요
                             </h1>
                         </div>
-                        <form onSubmit={handleSubmit} className="p-8 space-y-6">
+                        
+                        {/* [수정] onKeyDown 추가하여 엔터키 제출 방지 */}
+                        <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="p-8 space-y-6">
                             {docId && (
                                 <div className="bg-orange-50 text-orange-600 p-4 rounded-2xl text-sm font-bold flex items-center gap-2 border border-orange-100">
                                     <Icons.AlertCircle size={16}/> 기존 신청 내역을 수정 중입니다.
                                 </div>
                             )}
                             
-                            {/* [추가] 자동완성 알림 메시지 */}
                             {autoFilled && (
                                 <div className="bg-indigo-50 text-indigo-700 p-3 rounded-2xl text-sm font-bold flex items-center gap-2 animate-in slide-in-from-top-2 border border-indigo-100">
-                                    <Icons.Sparkles size={16} /> 기존 정보를 불러왔습니다!
+                                    <Icons.Sparkles size={16} /> 정보를 자동으로 불러왔습니다!
                                 </div>
                             )}
 
@@ -407,27 +443,49 @@
                                 <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.CalendarDays size={14}/> 주차 날짜</label>
                                 <input type="date" name="parkingDate" value={formData.parkingDate} onChange={handleChange} className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors" required />
                             </div>
+                            
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.User size={14}/> 성함</label>
+                                {/* [수정] 이름 입력창에 추천 리스트 UI 추가 */}
+                                <div className="space-y-2 relative">
+                                    <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2">
+                                        <Icons.User size={14}/> 성함
+                                    </label>
                                     <input 
                                         type="text" 
                                         name="name" 
                                         value={formData.name} 
-                                        onChange={handleChange} 
-                                        onBlur={handleNameBlur} // [중요] 이름 입력 후 포커스 아웃 시 자동완성
+                                        onChange={handleNameChange} 
+                                        onBlur={handleNameBlur}
                                         placeholder="성함" 
                                         className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors" 
                                         required 
+                                        autoComplete="off"
                                     />
+                                    {showSuggestions && suggestions.length > 0 && (
+                                        <ul className="absolute z-10 w-full bg-white border-2 border-slate-200 rounded-2xl mt-1 shadow-xl max-h-40 overflow-y-auto">
+                                            {suggestions.map((item, idx) => (
+                                                <li 
+                                                    key={idx} 
+                                                    onMouseDown={() => selectSuggestion(item.name)}
+                                                    className="p-3 hover:bg-blue-50 cursor-pointer font-bold text-slate-700 border-b border-slate-50 last:border-b-0 flex justify-between items-center"
+                                                >
+                                                    <span>{item.name}</span>
+                                                    <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-full">{item.position}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.Users size={14}/> 직분</label>
+                                    <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2">
+                                        <Icons.Users size={14}/> 직분
+                                    </label>
                                     <select name="position" value={formData.position} onChange={handleChange} className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors appearance-none">
                                         {POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
                                     </select>
                                 </div>
                             </div>
+                            
                             <div className="space-y-2">
                                 <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.Clock size={14}/> 주차 시간 선택 (3,000원/시간)</label>
                                 <select name="parkingDuration" value={formData.parkingDuration} onChange={handleChange} className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors appearance-none">
