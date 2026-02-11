@@ -18,7 +18,9 @@
     </script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
-        /* 모바일에서 선택창 화살표가 잘 보이도록 설정 */
+        /* 모바일 최적화: 기본 폰트 크기 조정 */
+        html, body { font-size: 16px; }
+        /* 선택창 화살표 스타일 */
         select {
             background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
             background-position: right 0.5rem center;
@@ -41,7 +43,7 @@
         import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, updateDoc, query, where, getDocs, orderBy, startAt, endAt, limit } from 'firebase/firestore';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
-        // 아이콘 컴포넌트 (직접 내장하여 오류 방지)
+        // 아이콘 컴포넌트
         const IconBase = ({ children, className, size = 24, ...props }) => (
             <svg 
                 xmlns="http://www.w3.org/2000/svg" 
@@ -108,11 +110,9 @@
             const [fileName, setFileName] = useState(null); 
             const [autoFilled, setAutoFilled] = useState(false); 
             
-            // 이름 검색 관련 상태
             const [suggestions, setSuggestions] = useState([]);
             const [showSuggestions, setShowSuggestions] = useState(false);
-
-            // 변경 전 원본 데이터를 저장해둘 상태
+            
             const [originalData, setOriginalData] = useState(null);
 
             const [formData, setFormData] = useState({
@@ -138,7 +138,7 @@
                 return () => unsub();
             }, []);
 
-            // [오류 해결] 누락되었던 공통 입력 핸들러 복구
+            // [오류 해결] 입력 핸들러 추가
             const handleChange = (e) => {
                 const { name, value } = e.target;
                 setFormData(prev => ({ ...prev, [name]: value }));
@@ -199,7 +199,6 @@
                     }
                 }
 
-                // 원본 데이터 저장 (수정 감지용)
                 const parsedData = {
                     name: data.name,
                     position: data.position || '성도',
@@ -211,6 +210,7 @@
                     parkingDuration: data.parkingDurationHours ? String(data.parkingDurationHours) : '1'
                 };
                 
+                // 원본 데이터 저장 (수정 감지용)
                 setOriginalData(parsedData); 
                 
                 setFormData(prev => ({
@@ -220,7 +220,6 @@
                 }));
             };
 
-            // [수정] 이름 검색 기능 강화 (최대 50명 표시, 성만 쳐도 나옴)
             const handleNameChange = async (e) => {
                 const val = e.target.value;
                 setFormData(prev => ({ ...prev, name: val }));
@@ -232,7 +231,7 @@
                             orderBy('name'),
                             startAt(val),
                             endAt(val + '\uf8ff'),
-                            limit(50) // 50명까지 검색
+                            limit(50) 
                         );
                         const querySnapshot = await getDocs(q);
                         const names = new Map();
@@ -246,34 +245,42 @@
                         
                         setSuggestions(Array.from(names.values()));
                         setShowSuggestions(true);
-                    } catch (error) {
-                        // console.error(error); 
-                    }
+                    } catch (error) {}
                 } else {
                     setSuggestions([]);
                     setShowSuggestions(false);
                 }
             };
 
-            // [수정] 이름 선택 시 데이터 자동 채움 + 자동완성 효과
             const selectSuggestion = async (selectedName) => {
                 setFormData(prev => ({ ...prev, name: selectedName }));
                 setShowSuggestions(false);
+                fetchAndFillData(selectedName);
+            };
 
+            const handleNameBlur = () => {
+                setTimeout(async () => {
+                    if (formData.name && formData.name.length >= 2 && !autoFilled) {
+                         fetchAndFillData(formData.name.trim());
+                    }
+                    setShowSuggestions(false);
+                }, 200);
+            };
+
+            const fetchAndFillData = async (targetName) => {
                 try {
-                    const q = query(
+                     const q = query(
                         collection(db, 'artifacts', appId, 'public', 'data', 'parkingRecords'),
-                        where('name', '==', selectedName)
+                        where('name', '==', targetName)
                     );
                     const querySnapshot = await getDocs(q);
-                    
                     if (!querySnapshot.empty) {
                         const docs = querySnapshot.docs.map(d => d.data());
                         docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
                         const match = docs[0];
-                        
                         fillFormData(match);
                         
+                        // 날짜와 시간은 현재 기준으로 리셋
                         setFormData(prev => ({
                             ...prev,
                             parkingDate: new Date().toISOString().split('T')[0],
@@ -283,40 +290,13 @@
                         setAutoFilled(true);
                         setTimeout(() => setAutoFilled(false), 3000);
                     }
-                } catch (e) { console.error(e); }
+                } catch(e) {}
             };
 
-            // [추가] 목록에서 선택하지 않고 이름만 입력하고 넘어갈 때도 자동완성 시도
-            const handleNameBlur = () => {
-                setTimeout(async () => {
-                    if (formData.name && formData.name.length >= 2 && !autoFilled) {
-                        // 입력한 이름과 정확히 일치하는 기록 찾기
-                        try {
-                             const q = query(
-                                collection(db, 'artifacts', appId, 'public', 'data', 'parkingRecords'),
-                                where('name', '==', formData.name.trim())
-                            );
-                            const querySnapshot = await getDocs(q);
-                            if (!querySnapshot.empty) {
-                                const docs = querySnapshot.docs.map(d => d.data());
-                                docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-                                const match = docs[0];
-                                
-                                fillFormData(match);
-                                setAutoFilled(true);
-                                setTimeout(() => setAutoFilled(false), 3000);
-                            }
-                        } catch(e) {}
-                    }
-                    setShowSuggestions(false);
-                }, 200);
-            };
-
-            // 엔터키 제출 방지
             const handleKeyDown = (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    handleNameBlur(); // 엔터치면 자동완성 시도
+                    handleNameBlur();
                 }
             };
 
@@ -371,14 +351,13 @@
                     return;
                 }
 
-                // [수정] 정보 변경 시 확인 팝업 (로직 강화)
-                // 불러온 원본 데이터가 있고, 현재 입력값 중 중요 정보가 달라졌을 때
+                // [수정] 수정 확인 팝업 강화
                 if (originalData) {
                     const isPositionChanged = originalData.position !== formData.position;
                     const isBankChanged = originalData.bankName !== formData.bankName || originalData.accountNumber !== formData.accountNumber;
                     
                     if (isPositionChanged || isBankChanged) {
-                        const confirmMsg = "직분 또는 계좌 정보가 변경되었습니다.\n\n정말 수정하시겠습니까?\n(확인 시 관리자 페이지에도 반영됩니다)";
+                        const confirmMsg = "직분 또는 계좌 정보가 변경되었습니다.\n\n정말 수정된 정보로 제출하시겠습니까?\n(확인 시 관리자 페이지에도 반영됩니다)";
                         if (!window.confirm(confirmMsg)) {
                             return; 
                         }
@@ -418,6 +397,28 @@
                         setDocId(docRef.id);
                     }
                     
+                    // 직분/계좌 변경 시 과거 데이터 업데이트 (이름이 일치하는 문서 찾기)
+                    if (originalData && (originalData.position !== formData.position || originalData.bankName !== formData.bankName || originalData.accountNumber !== formData.accountNumber)) {
+                        try {
+                            const q = query(
+                                collection(db, 'artifacts', appId, 'public', 'data', 'parkingRecords'),
+                                where('name', '==', formData.name.trim())
+                            );
+                            const snapshot = await getDocs(q);
+                            if (!snapshot.empty) {
+                                const updatePromises = snapshot.docs.map(d => 
+                                    updateDoc(d.ref, { 
+                                        position: formData.position,
+                                        accountInfo: `${formData.bankName}/${formData.accountNumber}`
+                                    })
+                                );
+                                await Promise.all(updatePromises);
+                            }
+                        } catch(err) {
+                            console.error("과거 데이터 업데이트 실패:", err);
+                        }
+                    }
+
                     const profile = { 
                         name: formData.name,
                         position: formData.position,
@@ -507,7 +508,7 @@
                                         autoComplete="off"
                                     />
                                     {showSuggestions && suggestions.length > 0 && (
-                                        <ul className="absolute z-30 w-full bg-white border-2 border-slate-200 rounded-2xl mt-1 shadow-xl max-h-48 overflow-y-auto">
+                                        <ul className="absolute z-10 w-full bg-white border-2 border-slate-200 rounded-2xl mt-1 shadow-xl max-h-48 overflow-y-auto">
                                             {suggestions.map((item, idx) => (
                                                 <li 
                                                     key={idx} 
@@ -562,8 +563,8 @@
                             <div className="space-y-2">
                                 <label className="text-sm font-black text-slate-500 ml-1 uppercase flex items-center gap-2"><Icons.Banknote size={14}/> 입금 계좌</label>
                                 <div className="flex gap-2">
-                                    {/* [수정] 모바일 화면에서 은행 선택 칸 넓이 40%로 조정 */}
-                                    <select name="bankName" value={formData.bankName} onChange={handleChange} className="w-[40%] p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors appearance-none">
+                                    {/* [수정] 모바일 화면에서 은행 선택 칸 넓이 45%로 확대 및 스타일 개선 */}
+                                    <select name="bankName" value={formData.bankName} onChange={handleChange} className="w-[45%] p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors appearance-none">
                                         {BANK_NAMES.map(bank => <option key={bank} value={bank}>{bank}</option>)}
                                     </select>
                                     <input type="text" name="accountNumber" value={formData.accountNumber} onChange={(e) => setFormData(prev => ({...prev, accountNumber: e.target.value.replace(/[^0-9]/g, '')}))} placeholder="계좌번호 (숫자만)" className="flex-1 p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-bold text-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors" required />
